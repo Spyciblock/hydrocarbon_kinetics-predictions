@@ -2,6 +2,8 @@ import numpy as np
 import networkx as nx
 import pdb
 
+# This class allows to get the evolution of the number of different molecules for
+# a simulation. It uses the adjacency matrix at each time and recreate the molecules.
 
 class MoleculeList:
     def __init__(self, num_of_atoms, atom_types, num_of_types):
@@ -19,13 +21,15 @@ class MoleculeList:
 
     def get_molecule_full(self, first_frame, bond_change):
         # Perform the whole analysis to get the numbers of molecules at all frames.
-        self.create_graph(first_frame)
-        [molecules_frame, molecules_counts] = self.get_molecules_frame(self.molecule_graph)
+        self.create_graph(first_frame) # Initialize the graph using first_frame, which is the adjacency matrix at the first frame.
+        [molecules_frame, molecules_counts] = self.get_molecules_frame(self.molecule_graph) # Get the molecules and their counts at the first frame
         self.update_molecule_per_frame_and_dict(molecules_frame, molecules_counts)
         self.molecule_all_frames = np.zeros([len(bond_change)+1, 50000], dtype=int)
         self.molecule_all_frames[0, :self.molecule_per_frame.shape[0]] = self.molecule_per_frame
         step_with_reax = 1
         time_counter = 100
+        # Loop through the timesteps where a reaction happen. Get the change in the number of molecules,
+        # store the numbers in self.molecule_all_frames and the molecules names in self.molecule_dict.
         for frame in bond_change.keys():
             if frame > time_counter:
                 print(frame, flush=True)
@@ -37,26 +41,8 @@ class MoleculeList:
         self.molecule_all_frames = self.molecule_all_frames[:, 0:self.molecule_dict.shape[0]]
         return self.molecule_all_frames, self.molecule_dict
 
-    def initialize_molecules(self, first_frame, start_frame_MD):
-        self.create_graph(first_frame)
-        if self.reaction_features[1] == 1:
-            self.update_molecules_idx_atoms_frame()
-        self.time_range = np.array([start_frame_MD])
-        [molecules_frame, molecules_counts] = self.get_molecules_frame(self.molecule_graph)
-        self.update_molecule_per_frame_and_dict(molecules_frame, molecules_counts)
-        self.molecule_all_frames[0, :self.molecule_per_frame.shape[0]] = self.molecule_per_frame
-        self.step_with_reax = 1
-
-    def update_after_reaction(self, frame, bond_change_frame):
-        self.time_range = np.append(self.time_range, frame)
-        [molecules_frame_change, molecules_counts_change, old_molecules_frame, old_molecule_bond_change, new_molecules_frame, new_molecule_bond_change] = self.get_molecules_change(bond_change_frame)
-        self.update_molecule_per_frame_and_dict(molecules_frame_change, molecules_counts_change)
-        self.update_molecule_all_frames(self.step_with_reax)
-        self.step_with_reax += 1
-        return [old_molecules_frame, old_molecule_bond_change, new_molecules_frame, new_molecule_bond_change]
-
     def create_graph(self, bond_matrix):
-        # Create the graph of molecules
+        # Create the graph of molecules using bond_matrix which is an adjacency matrix.
         self.molecule_graph = nx.Graph(bond_matrix)
         for atom in range(self.num_of_atoms):
             self.molecule_graph.nodes[atom]['type'] = self.atom_types[atom]
@@ -103,20 +89,25 @@ class MoleculeList:
 
     def get_molecules_change(self, bond_change):
         # Compute the change in molecules.
-        atoms_involved = np.unique(bond_change[:, :2])
+        atoms_involved = np.unique(bond_change[:, :2])  # Atoms indices that are involved in one of the reaction of bond_change
         molecule_subset_old = set()
         molecule_subset_new = set()
+        # Get the molecules involved in the reactions of bond_change.
         for atom in atoms_involved:
             molecule_subset_old = molecule_subset_old.union(nx.node_connected_component(self.molecule_graph, atom))
+        # Get the molecules before the reaction
         [old_molecules, old_molecules_count, old_molecules_frame, old_mol_atoms_involved] = self.get_molecules_frame(self.molecule_graph.subgraph(molecule_subset_old), atoms_involved)
         old_molecule_bond_change = self.get_molecule_bond_change(old_mol_atoms_involved, atoms_involved, bond_change)
+        # Update the graph of the system with the reactions in bond_change
         self.update_molecule_graph(bond_change)
         for atom in atoms_involved:
             molecule_subset_new = molecule_subset_new.union(nx.node_connected_component(self.molecule_graph, atom))
+         # Get the molecules after the reactions.
         [new_molecules, new_molecules_count, new_molecules_frame, new_mol_atoms_involved] = self.get_molecules_frame(self.molecule_graph.subgraph(molecule_subset_new), atoms_involved)
         new_molecule_bond_change = self.get_molecule_bond_change(new_mol_atoms_involved, atoms_involved, bond_change)
         molecules_frame_change = new_molecules.copy()
         molecules_counts_change = new_molecules_count.copy()
+        # Calculate the molecules changes
         for mol in range(old_molecules.shape[0]):
             molecule_idx = np.where((molecules_frame_change == old_molecules[mol, :]).all(axis=1))
             if molecule_idx[0].shape[0] == 0:
