@@ -10,27 +10,28 @@ from io import BytesIO
 def get_constants(foldername, atom_features_bool, pairs_features_bool):
   # Get some useful constants from the simulation
   atom_types = np.load(foldername + 'input_atom/atom_types.npy')
-  num_atoms = atom_types.shape[0]
-  num_atom_features = count_ones_in_dict(atom_features_bool)
-  num_pairs_features = count_ones_in_dict(pairs_features_bool)
-  num_timesteps = get_num_timesteps(foldername)
+  num_atoms = atom_types.shape[0]  # Number of atoms in the simulations
+  num_atom_features = count_ones_in_dict(atom_features_bool)  # Number of features to describe one atom
+  num_pairs_features = count_ones_in_dict(pairs_features_bool)  # Number of features to describe an atom pair
+  num_timesteps = get_num_timesteps(foldername)  # Number of timesteps in the simulation
   return num_atoms, num_atom_features, num_pairs_features, num_timesteps
 
 def get_constants_bucket(foldername, atom_features_bool, pairs_features_bool):
-  # Get some useful constants from the simulation
-  client = boto3.client('s3')
+  # Get some useful constants from the simulation when loading from Amazon S3 bucket.
+  client = boto3.client('s3')  # Setting up the bucket
   s3 = boto3.resource('s3')
-  bucket = s3.Bucket('chemical-datasets')
+  bucket = s3.Bucket('chemical-datasets')  # Work with the folder 'chemical-datasets' of the bucket
   file_object = bucket.Object(key=foldername + 'input_atom/atom_types.npy').get()
   atom_types = np.load(BytesIO(file_object['Body'].read()))  
-#   atom_types = np.load(foldername + 'input_atom/atom_types.npy')
-  num_atoms = atom_types.shape[0]
-  num_atom_features = count_ones_in_dict(atom_features_bool)
-  num_pairs_features = count_ones_in_dict(pairs_features_bool)
-  num_timesteps = get_num_timesteps_bucket(foldername, bucket)
+  num_atoms = atom_types.shape[0]   # Number of atoms in the simulations
+  num_atom_features = count_ones_in_dict(atom_features_bool)  # Number of features to describe one atom
+  num_pairs_features = count_ones_in_dict(pairs_features_bool)  # Number of features to describe an atom pair
+  num_timesteps = get_num_timesteps_bucket(foldername, bucket)  # Number of timesteps in the simulation
   return num_atoms, num_atom_features, num_pairs_features, num_timesteps
 
 def count_ones_in_dict(dictionary):
+  # Get the number of values equal to 1 in a boolean dictionary.
+  # Used for the boolean dictionary of features
   num_ones = 0
   for key in dictionary.keys():
     if dictionary[key] == 1:
@@ -39,7 +40,7 @@ def count_ones_in_dict(dictionary):
 
 def get_num_timesteps(foldername):
   # For the simulation in foldername, get the number of timesteps, which is equal to
-  # the number of files in output
+  # the number of dataset in the HDF5 file of the output.
   with h5py.File(foldername + 'output/output.hdf5', 'r') as f:
     num_of_keys = 0
     for key in f.keys():
@@ -49,7 +50,7 @@ def get_num_timesteps(foldername):
 
 def get_num_timesteps_bucket(foldername, bucket):
   # For the simulation in foldername, get the number of timesteps, which is equal to
-  # the number of files in output
+  # the number of dataset in the HDF5 file of the output. (Here for the bucket)
   file_object = bucket.Object(key=foldername + 'output/output.hdf5').get()
   with h5py.File(BytesIO(file_object['Body'].read()), 'r') as f:
     num_of_keys = 0
@@ -59,6 +60,8 @@ def get_num_timesteps_bucket(foldername, bucket):
   return num_of_keys - 1 
 
 def keep_only_dictionary_with_iterations(dictionary, num_iterations):
+  # The dictionary has the bond changes occuring at each timestep. This function
+  # keeps only the keys in the dictionary before num_iterations reactions occur.
   new_dict = {}
   time_range = np.array([0])
   num_iterations_so_far = 0
@@ -71,6 +74,7 @@ def keep_only_dictionary_with_iterations(dictionary, num_iterations):
   return new_dict, time_range
 
 def plot_molecules_of_interest(molecules_per_frame, molecule_list, time_range, molecules_per_frame_MD, molecule_list_MD, time_range_MD, molecules_of_interest):
+  # Plot the molecules_of_interest for the ground truth and the ML model results.
   fig_num = 0
   for i in range(molecules_of_interest.shape[0]):
     idx_mol = np.where((molecule_list == molecules_of_interest[i]).all(-1))[0][0]
