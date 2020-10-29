@@ -13,6 +13,7 @@ def run_KMC(model, num_iterations, foldername, atom_features_bool, pairs_feature
                 num_atom_features, num_pairs_features, num_atoms, 
                 molecule_size_normalizer, cycle_size_normalizer, max_num_of_bonds,
                 num_timesteps, validation_percentage)
+  # Get the initial input for the model
   Xtest_input_atom, Xtest_input_pairs, Xtest_atom_graph, Xtest_mask, Ytest = data_loader.get_data_no_generator(1, 1, 'train')
   bond_change = {}
   first_frame = Xtest_input_pairs[0, :, :, 0].numpy()
@@ -22,14 +23,18 @@ def run_KMC(model, num_iterations, foldername, atom_features_bool, pairs_feature
   for i in range(num_iterations):
     if i % 10 == 0:
       print(i)
+    # Get the "reactivity scores" from the model
     results = model.predict([Xtest_input_atom, Xtest_input_pairs, Xtest_atom_graph, Xtest_mask])
+    # From the "reactivity scores" pick a reaction and the time before this reaction using the Kinetic Monte Carlo algorithm.
     adjacency_matrix, bond_change, time_new = run_step_KMC(results[0, :, :, 0], adjacency_matrix, bond_change, time[-1])
     time.append(time_new)
+    # Update the system with the picked reaction and recalculate the input of the model.
     Xtest_input_atom, Xtest_input_pairs, Xtest_atom_graph = get_new_input(adjacency_matrix, atom_features_bool, pairs_features_bool, molecule_size_normalizer, cycle_size_normalizer, num_atoms, num_atom_features, num_pairs_features, max_num_of_bonds, atom_types)
   return bond_change, first_frame, time
 
 def run_step_KMC(propensity, adjacency_matrix, bond_change, time):
-  # Run one step of the Kinetic Monte Carlo.
+  # Run one step of the Kinetic Monte Carlo. Choose the reaction to happen and the time before this
+  # reaction using the propensities. Store these in bond_change and time
   propensity_temp = np.triu(propensity, k = 1).flatten()
   reaction_to_happen, time_to_reaction = pick_reaction_and_time(propensity_temp)
   at_1, at_2 = np.unravel_index(reaction_to_happen, adjacency_matrix.shape)
@@ -51,13 +56,14 @@ def pick_reaction_and_time(propensity):
 def get_new_input(adjacency_matrix, atom_features_bool, pairs_features_bool, molecule_size_normalizer, cycle_size_normalizer, num_atoms, num_atoms_features, num_pairs_features, max_num_of_bonds, atom_types):
   # When one step of the Kinetic Monte Carlo process, all the input data for the 
   # model need to be computed from the new adjacency matrix.
-  molecule_graph = nx.Graph(adjacency_matrix)
+  molecule_graph = nx.Graph(adjacency_matrix)  # Define the graph of the molecular system
   input_atom = get_input_atom(molecule_graph, atom_features_bool, molecule_size_normalizer, cycle_size_normalizer, num_atoms, num_atoms_features, atom_types)
   input_pairs = get_input_pairs(molecule_graph, adjacency_matrix, pairs_features_bool, molecule_size_normalizer, num_atoms, num_pairs_features)
   atom_graph, bond_graph, mask = get_graph_info(adjacency_matrix, num_atoms, max_num_of_bonds)
   return input_atom, input_pairs, atom_graph
 
 def get_input_atom(molecule_graph, atom_features_bool, molecule_size_normalizer, cycle_size_normalizer, num_atoms, num_atoms_features, atom_types):
+  # From molecule_graph, get the input_atom for the model.
   input_atom = np.zeros([1, num_atoms, num_atoms_features])
   pos = 0
   if atom_features_bool["Atom types"]:
@@ -73,6 +79,7 @@ def get_input_atom(molecule_graph, atom_features_bool, molecule_size_normalizer,
   return input_atom
 
 def get_cycle_size(molecule_graph, num_atoms):
+  # Get the cycle size each atom is in.
   cycle_size = np.zeros([num_atoms])
   cycles = nx.cycle_basis(molecule_graph)
   for c in range(len(cycles)):
@@ -86,6 +93,7 @@ def get_cycle_size(molecule_graph, num_atoms):
   return cycle_size
 
 def get_molecule_size(molecule_graph, num_atoms):
+  # Get the molecule size of the molecule containing each atom.
   molecule_size = np.zeros([num_atoms])
   molecules = nx.connected_components(molecule_graph)
   for mol in molecules:
@@ -95,6 +103,7 @@ def get_molecule_size(molecule_graph, num_atoms):
   return molecule_size
 
 def get_input_pairs(molecule_graph, adjacency_matrix, pairs_features_bool, molecule_size_normalizer, num_atoms, num_pairs_features):
+  # From molecule_graph, get the input_pairs for the ML model.
   input_pairs = np.zeros([1, num_atoms, num_atoms, num_pairs_features])
   pos = 0
   if pairs_features_bool["Bonded"] == 1:
@@ -110,6 +119,7 @@ def get_input_pairs(molecule_graph, adjacency_matrix, pairs_features_bool, molec
   return input_pairs
 
 def get_same_cycle(molecule_graph, num_atoms):
+  # For a pair of atoms, same_cycle is 1 is the two atoms are in the same cycle and 0 otherwise.
   same_cycle = np.zeros([num_atoms, num_atoms])
   cycles = nx.cycle_basis(molecule_graph)
   for c in range(len(cycles)):
@@ -125,6 +135,8 @@ def get_same_cycle(molecule_graph, num_atoms):
   return same_cycle
 
 def get_same_molecule(molecule_graph, num_atoms):
+  # For a pair of atoms, same_molecule is 0 is the two atoms are not in the same molecule and is equal
+  # to the distance between these two atoms in the molecule otherwise.
   same_molecule = np.zeros([num_atoms, num_atoms])
   lengths = nx.all_pairs_shortest_path_length(molecule_graph)
   for i in lengths:
@@ -134,6 +146,7 @@ def get_same_molecule(molecule_graph, num_atoms):
   return same_molecule
 
 def get_graph_info(adjacency_matrix, num_atoms, max_num_of_bonds):
+  # Get atom_graph and bond_graph inputs for the model
   atom_graph = np.zeros([1, num_atoms, max_num_of_bonds, 2])
   bond_graph = np.zeros([1, num_atoms, max_num_of_bonds, 3])
   mask = np.zeros([1, num_atoms, max_num_of_bonds])
