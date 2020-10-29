@@ -45,7 +45,6 @@ def get_num_timesteps(foldername):
     num_of_keys = 0
     for key in f.keys():
       num_of_keys += 1
-  # onlyfiles = next(os.walk(foldername + 'output/'))[2] #dir is your directory path as string
   return num_of_keys - 1 
 
 def get_num_timesteps_bucket(foldername, bucket):
@@ -56,7 +55,6 @@ def get_num_timesteps_bucket(foldername, bucket):
     num_of_keys = 0
     for key in f.keys():
       num_of_keys += 1
-  # onlyfiles = next(os.walk(foldername + 'output/'))[2] #dir is your directory path as string
   return num_of_keys - 1 
 
 def keep_only_dictionary_with_iterations(dictionary, num_iterations):
