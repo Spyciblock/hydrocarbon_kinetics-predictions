@@ -52,7 +52,7 @@ if __name__ == "__main__":
         foldername ='/home/ubuntu/Data/C4H10_600ps/'
     else:
         foldername = 'C4H10_10ps/'
-    # Define which features to use
+    # Define which features to use with boolean value
     atom_features_bool = {"Atom types": 1,
         "Cycle size": 1,
         "Molecule size": 1}
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     early_stopping = tf.keras.callbacks.EarlyStopping(monitor='loss', patience=3, mode='max', restore_best_weights=True)
     callbacks_list = [early_stopping]
 
-    # Build optimizer by using adam optimizer and mse loss, accuracy metric 
+    # Build the model by using the adam optimizer and mse loss, accuracy metric 
     model.compile(optimizer='adam',
             loss='mse', metrics=['accuracy'])
 
@@ -139,7 +139,7 @@ if __name__ == "__main__":
             batch_size=batch_size, epochs=num_epochs, 
             validation_data=([X_input_atom_val, X_input_pairs_val, X_atom_graph_val, X_mask_val], Y_val), callbacks=callbacks_list)
 
-    #Save the model as my_model
+    #Save the model
     model.save('saved_model/my_secondmodel') 
 
     #Save  loss history into png file
