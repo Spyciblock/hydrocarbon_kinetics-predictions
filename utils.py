@@ -71,22 +71,30 @@ def keep_only_dictionary_with_iterations(dictionary, num_iterations):
       break
   return new_dict, time_range
 
-def plot_molecules_of_interest(molecules_per_frame, molecule_list, time_range, molecules_per_frame_MD, molecule_list_MD, time_range_MD, molecules_of_interest):
+def plot_molecules_of_interest(foldername, name_training, molecules_per_frame, molecule_list, time_range, molecules_per_frame_MD, molecule_list_MD, time_range_MD, molecules_of_interest):
   # Plot the molecules_of_interest for the ground truth and the ML model results.
   fig_num = 0
+  if not os.path.exists('./plots/'):
+    os.mkdir('./plots/')
   for i in range(molecules_of_interest.shape[0]):
     idx_mol = np.where((molecule_list == molecules_of_interest[i]).all(-1))[0][0]
     idx_mol_MD = np.where((molecule_list_MD == molecules_of_interest[i]).all(-1))[0][0]
     plt.figure(fig_num)
+     #test autoscale
+    plt.autoscale(enable=True, axis='both', tight=None)
     plt.plot(time_range, molecules_per_frame[:, idx_mol])
     plt.title("ML model " + "C" + str(molecules_of_interest[i, 0]) + "H" + str(molecules_of_interest[i, 1]))
-    plt.savefig("./plots/" + "ML_model_" + "C" + str(molecules_of_interest[i, 0]) + "H" + str(molecules_of_interest[i, 1]))
+    plt.savefig(foldername + "plots/" + str(name_training) + "/ML_model_" + "C" + str(molecules_of_interest[i, 0]) + "H" + str(molecules_of_interest[i, 1]))
+    plt.close()
     fig_num += 1
     plt.figure(fig_num)
+    #test autoscale
+    plt.autoscale(enable=True, axis='both', tight=None)
     plt.plot(time_range_MD, molecules_per_frame_MD[:, idx_mol_MD])
     plt.title("Ground truth " + "C" + str(molecules_of_interest[i, 0]) + "H" + str(molecules_of_interest[i, 1]))
     fig_num += 1
-    plt.savefig("./plots/" + "truth_" + "C" + str(molecules_of_interest[i, 0]) + "H" + str(molecules_of_interest[i, 1]))
+    plt.savefig(foldername + "plots/" + str(name_training) +  "/truth_" + "C" + str(molecules_of_interest[i, 0]) + "H" + str(molecules_of_interest[i, 1]))
+    plt.close()
   longest_molecules = np.zeros(len(time_range))
   longest_molecules_MD = np.zeros(len(time_range_MD))
   for t in range(len(time_range)):
@@ -96,13 +104,18 @@ def plot_molecules_of_interest(molecules_per_frame, molecule_list, time_range, m
     mol_present = np.where(molecules_per_frame_MD[t])
     longest_molecules_MD[t] = np.max(molecule_list_MD[mol_present, 0])
   plt.figure(fig_num)
+  #test autoscale
+  plt.autoscale(enable=True, axis='both', tight=None)
   plt.plot(time_range, longest_molecules)
   plt.title("ML model, size of the longest molecule")
-  plt.savefig("./plots/ML_model_longest_molecule")
+  plt.savefig(foldername + "plots/" + str(name_training) + "/ML_model_longest_molecule")
+  plt.close()
   fig_num += 1
   plt.figure(fig_num)
+  #test autoscale
+  plt.autoscale(enable=True, axis='both', tight=None)
   plt.plot(time_range_MD, longest_molecules_MD)
   plt.title("Ground truth, size of the longest molecule")
-  plt.savefig("./plots/truth_longest_molecule")
+  plt.savefig(foldername + "plots/"+ str(name_training) + "/truth_longest_molecule")
   fig_num += 1
-  plt.show()
+  plt.close()

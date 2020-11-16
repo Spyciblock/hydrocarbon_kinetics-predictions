@@ -14,9 +14,9 @@ def run_KMC(model, num_iterations, foldername, atom_features_bool, pairs_feature
                 molecule_size_normalizer, cycle_size_normalizer, max_num_of_bonds,
                 num_timesteps, validation_percentage)
   # Get the initial input for the model
-  Xtest_input_atom, Xtest_input_pairs, Xtest_atom_graph, Xtest_mask, Ytest = data_loader.get_data_no_generator(1, 1, 'train')
+  Xtest_input_atom, Xtest_input_pairs, Xtest_atom_graph, Xtest_mask, Xtest_extract_pairs, Ytest, Ytest_time = data_loader.get_data_no_generator(1, 1, 'train')
   bond_change = {}
-  first_frame = Xtest_input_pairs[0, :, :, 0].numpy()
+  first_frame = get_first_frame(Xtest_input_pairs, Xtest_extract_pairs, num_atoms)
   atom_types = Xtest_input_atom[0, :, 0]
   adjacency_matrix = first_frame.copy()
   time = [0]
@@ -24,20 +24,28 @@ def run_KMC(model, num_iterations, foldername, atom_features_bool, pairs_feature
     if i % 10 == 0:
       print(i)
     # Get the "reactivity scores" from the model
-    results = model.predict([Xtest_input_atom, Xtest_input_pairs, Xtest_atom_graph, Xtest_mask])
+    results_probs, result_time = model.predict([Xtest_input_atom, Xtest_input_pairs, Xtest_atom_graph, Xtest_mask, Xtest_extract_pairs])
     # From the "reactivity scores" pick a reaction and the time before this reaction using the Kinetic Monte Carlo algorithm.
-    adjacency_matrix, bond_change, time_new = run_step_KMC(results[0, :, :, 0], adjacency_matrix, bond_change, time[-1])
+    adjacency_matrix, bond_change, time_new = run_step_KMC(results_probs[0], result_time[0, 0], Xtest_extract_pairs, adjacency_matrix, bond_change, time[-1])
     time.append(time_new)
     # Update the system with the picked reaction and recalculate the input of the model.
     Xtest_input_atom, Xtest_input_pairs, Xtest_atom_graph = get_new_input(adjacency_matrix, atom_features_bool, pairs_features_bool, molecule_size_normalizer, cycle_size_normalizer, num_atoms, num_atom_features, num_pairs_features, max_num_of_bonds, atom_types)
+    Xtest_input_pairs = tf.gather_nd(Xtest_input_pairs, Xtest_extract_pairs)
   return bond_change, first_frame, time
 
-def run_step_KMC(propensity, adjacency_matrix, bond_change, time):
+def get_first_frame(input_pairs, extract_pairs, num_atoms):
+  first_frame = np.zeros([num_atoms, num_atoms], dtype=int)
+  # for i in range(input_pairs.shape[1]):
+  first_frame[extract_pairs[0, :, 1], extract_pairs[0, :, 2]] = input_pairs[0, :, 0]
+  first_frame[extract_pairs[0, :, 2], extract_pairs[0, :, 1]] = input_pairs[0, :, 0]
+  return first_frame
+
+def run_step_KMC(propensity, time_parameter, extract_pairs, adjacency_matrix, bond_change, time):
   # Run one step of the Kinetic Monte Carlo. Choose the reaction to happen and the time before this
   # reaction using the propensities. Store these in bond_change and time
-  propensity_temp = np.triu(propensity, k = 1).flatten()
-  reaction_to_happen, time_to_reaction = pick_reaction_and_time(propensity_temp)
-  at_1, at_2 = np.unravel_index(reaction_to_happen, adjacency_matrix.shape)
+  reaction_to_happen, time_to_reaction = pick_reaction_and_time(propensity, time_parameter)
+  at_1 = extract_pairs[0, reaction_to_happen, 1]
+  at_2 = extract_pairs[0, reaction_to_happen, 2]
   adjacency_matrix[at_1, at_2] = 1 - adjacency_matrix[at_1, at_2]
   adjacency_matrix[at_2, at_1] = 1 - adjacency_matrix[at_2, at_1]
   time += time_to_reaction
@@ -45,11 +53,11 @@ def run_step_KMC(propensity, adjacency_matrix, bond_change, time):
   return adjacency_matrix, bond_change, time
 
 
-def pick_reaction_and_time(propensity):
+def pick_reaction_and_time(propensity, time_parameter):
   # Choose the reaction that is going to happen and the delay before it happens.
   propensity_tot = np.sum(propensity)
   r = np.random.random((2,))
-  time_to_reaction = 1/propensity_tot*np.log(1/r[0])
+  time_to_reaction = 1/time_parameter*np.log(1/r[0])
   reaction_to_happen = int(np.argwhere(np.cumsum(propensity) >= r[1]*propensity_tot)[0])
   return reaction_to_happen, time_to_reaction
 

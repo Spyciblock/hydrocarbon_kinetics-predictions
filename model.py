@@ -11,21 +11,38 @@ import os,datetime
 import boto3
 
 # Model Architecture v1 initialization
-def model_init(num_atoms, num_atom_features, num_pairs_features, max_num_of_bonds, depth=1):
+def model_init(num_atoms, num_atom_features, num_pairs_features, max_num_of_bonds, hidden_size=32, depth=1, batchnorm=0, last_batchnorm=0, activ='relu', init='glorot_uniform', second_part_loop=1, add_layers_1=0, reduce_sum_bool=1, loop_multiplier=1, pairs_encoding_multiplier=1):
   # Inputs: atoms, pairs of atoms, graph of atoms, and mask to use
   input_atom = tf.keras.Input(shape=[num_atoms, num_atom_features])                    # shape = num_atoms, num_atom_features
-  input_pairs = tf.keras.Input(shape=[num_atoms, num_atoms, num_pairs_features])       # shape = num_atoms, num_atoms, num_pair_atoms_features
+  input_pairs = tf.keras.Input(shape=[num_atoms*(num_atoms - 1)//2, num_pairs_features])       # shape = num_atoms, num_atoms, num_pair_atoms_features
   atom_graph = tf.keras.Input(shape=[num_atoms, max_num_of_bonds, 2], dtype=tf.int32)  # shape = num_atoms, max_num_of_bonds, 2
   mask = tf.keras.Input(shape=[num_atoms, max_num_of_bonds, 1], dtype=tf.float32)      # shape = num_atoms, max_num_of_bonds, 1
+  extract_pairs = tf.keras.Input(shape=[num_atoms*(num_atoms - 1)//2, 3], dtype=tf.int32)
 
   print("new_input_atom shape=",input_atom.shape)
-  print("atom_graph shape=",atom_graph.shape)
-
-  #Define size of a layer
-  hidden_size = 32        
+  print("atom_graph shape=",atom_graph.shape)     
   
   # Use input atoms and encode it into our neural network
-  atom_features=  tf.keras.layers.Dense(hidden_size, activation='relu',name="Dense0")(input_atom) 
+  atom_features = tf.keras.layers.Dense(loop_multiplier*hidden_size, activation=activ, kernel_initializer=init, name="Dense0")(input_atom) 
+  if batchnorm == 1:
+    atom_features = tf.keras.layers.BatchNormalization()(atom_features)
+
+  dense_1 = tf.keras.layers.Dense(loop_multiplier*hidden_size, activation=activ, kernel_initializer=init, name='dense1-1')
+  dense_2 = tf.keras.layers.Dense(loop_multiplier*hidden_size, activation=activ, kernel_initializer=init, name="dense1-2")
+  dense_3 = tf.keras.layers.Dense(hidden_size, activation=activ, kernel_initializer=init, name="dense1-3")
+  dense_4 = tf.keras.layers.Dense(loop_multiplier*hidden_size, activation=activ, kernel_initializer=init, name="dense1-4")
+  dense_5 = tf.keras.layers.Dense(loop_multiplier*hidden_size, activation=activ, kernel_initializer=init, name="dense1-5")
+  if second_part_loop == 0:
+    dense_12 = tf.keras.layers.Dense(loop_multiplier*hidden_size, activation=activ, kernel_initializer=init, name="dense1-12")
+  if reduce_sum_bool == 0:
+    dense_11 = tf.keras.layers.Dense(loop_multiplier*hidden_size, activation=activ, kernel_initializer=init, name="dense1-11")
+  if add_layers_1 == 1:
+    dense_6 = tf.keras.layers.Dense(loop_multiplier*hidden_size, activation=activ, kernel_initializer=init, name='dense1-6')
+    dense_7 = tf.keras.layers.Dense(loop_multiplier*hidden_size, activation=activ, kernel_initializer=init, name="dense1-7")
+    dense_8 = tf.keras.layers.Dense(hidden_size, activation=activ, kernel_initializer=init, name="dense1-8")
+    dense_9 = tf.keras.layers.Dense(loop_multiplier*hidden_size, activation=activ, kernel_initializer=init, name="dense1-9")
+    dense_10 = tf.keras.layers.Dense(loop_multiplier*hidden_size, activation=activ, kernel_initializer=init, name="dense1-10")
+    
 
   # Get Embedding of features using a loop to update atoms features,evolve the system
   for i in range(depth):
@@ -34,71 +51,133 @@ def model_init(num_atoms, num_atom_features, num_pairs_features, max_num_of_bond
     print("fatom_nei shape=",fatom_nei.shape)
 
     #Pass all generated neighbors into  the NN
-    h_nei_atom = tf.keras.layers.Dense(hidden_size, activation="relu",name='Dense1')(fatom_nei)       # shape = num_atoms,max_numbonds,hiddensize)
+    h_nei_atom = dense_1(fatom_nei)       # shape = num_atoms,max_numbonds,hiddensize)
+    if add_layers_1 == 1:
+        h_nei_atom = dense_6(h_nei_atom)
+    if batchnorm == 1:
+      h_nei_atom = tf.keras.layers.BatchNormalization()(h_nei_atom)
     print("h_nei_atom shape=",h_nei_atom.shape)
     # Add a mask to retrieve all existed bonds, because most of the atoms form less than the maximal number of bonds.
-    h_nei_atom = tf.math.multiply(h_nei_atom,tf.tile(mask, [1, 1, 1, h_nei_atom.shape[-1]]))   
+    h_nei_atom = tf.keras.layers.Multiply()([h_nei_atom, mask])   
 
     # Pass all atoms features into the NN model
-    f_self = tf.keras.layers.Dense(hidden_size, activation="relu",name="Dense2")(atom_features)        #shape = num atoms, hiddensize
+    f_self = dense_2(atom_features)        #shape = num atoms, hiddensize
+    if add_layers_1 == 1:
+        f_self = dense_7(f_self)
+    if batchnorm == 1:
+      f_self = tf.keras.layers.BatchNormalization()(f_self)
     print("f_self=",f_self.shape)
         
     # Remove max num of bonds dimension and combine the neighbors features with the atom features to get all informations on atoms, a new representation
-    f_nei = tf.reduce_sum(h_nei_atom, -2)         
+    if reduce_sum_bool == 1:   
+        f_nei = tf.reduce_sum(h_nei_atom, -2)         
+    else:
+        f_nei = tf.keras.layers.Reshape([num_atoms, -1])(h_nei_atom)
+        f_nei = dense_11(f_nei)
     print("f_nei shape =",f_nei.shape)
-    multiterms = f_nei*f_self                   #shape = num_atoms,hidden_size
+    multiterms = tf.keras.layers.Multiply()([f_nei, f_self])                #shape = num_atoms,hidden_size
     print("multiterms shape =",multiterms.shape)
 
     #Add the new atoms representation into the neural network
-    final_step= tf.keras.layers.Dense(hidden_size, activation="relu",name="Dense3")(multiterms)       #shape = num_atoms,hidden_size
+    final_step= dense_3(multiterms)       #shape = num_atoms,hidden_size
+    if add_layers_1 == 1:
+        final_step = dense_8(final_step)
+    if batchnorm == 1:
+      final_step = tf.keras.layers.BatchNormalization()(final_step)
     print("final_step shape=",final_step.shape)
 
-    #################################UPDATES atoms features ######################################
-    # Use the previous embedding of atoms features  and the features of the atoms bonded to update the neighbors of atoms
-    nei_part = tf.keras.layers.Dense(hidden_size, activation="relu",name="Dense4")(fatom_nei)         #shape = num_atoms,max_num_bonds,hidden_size
-    print("nei_part shape=",nei_part.shape)
-    # Add mask to retrieve all existed bonds, because most of the atoms form less than the maximum possible number of bonds.
-    nei_part = tf.math.multiply(nei_part, mask)                     
-    nei_partbis = tf.reduce_sum(nei_part ,-2)                   #shape = num_atoms,hidden_size
-    print("nei_partbis shape=",nei_partbis.shape)
-
-    #Gather the orignal atoms features and the new pairs of atoms to form a new environment
-    new_part = tf.concat([atom_features, nei_partbis], 2)       #shape = num_atoms,hidden_size*2
-    print("new_part shape=",new_part.shape)
-
-    # Add  the new environment, composed of all new neighbors features and atom features into the NN , this updates the atom features reused at the beginning of this loop
-    atom_features =tf.keras.layers.Dense(hidden_size, activation='relu',name="Dense5")(new_part)      #shape = num_atoms,hidden_size
-    print("new atom_features shape=",atom_features.shape)
+    if second_part_loop == 0:
+        atom_features = dense_12(final_step)
+    else:
+		
+        #################################UPDATES atoms features ######################################
+        # Use the previous embedding of atoms features  and the features of the atoms bonded to update the neighbors of atoms
+        nei_part = dense_4(fatom_nei)         #shape = num_atoms,max_num_bonds,hidden_size
+        if add_layers_1 == 1:
+            nei_part = dense_9(nei_part)
+        if batchnorm == 1:
+          nei_part = tf.keras.layers.BatchNormalization()(nei_part)
+        print("nei_part shape=",nei_part.shape)
+        # Add mask to retrieve all existed bonds, because most of the atoms form less than the maximum possible number of bonds.
+        nei_part = tf.keras.layers.Multiply()([nei_part, mask])                     
+        nei_partbis = tf.reduce_sum(nei_part ,-2)                   #shape = num_atoms,hidden_size
+        print("nei_partbis shape=",nei_partbis.shape)
+    
+        #Gather the orignal atoms features and the new pairs of atoms to form a new environment
+        new_part = tf.keras.layers.Concatenate(axis=2)([atom_features, nei_partbis])       #shape = num_atoms,hidden_size*2
+        print("new_part shape=",new_part.shape)
+    
+        # Add  the new environment, composed of all new neighbors features and atom features into the NN , this updates the atom features reused at the beginning of this loop
+        atom_features = dense_5(new_part)      #shape = num_atoms,hidden_size
+        if add_layers_1 == 1:
+            atom_features = dense_10(atom_features)
+        if batchnorm == 1:
+          atom_features = tf.keras.layers.BatchNormalization()(atom_features)
+        print("new atom_features shape=",atom_features.shape)
 
   final_input_atom=final_step                       
   print("final_input_atom shape=",final_input_atom.shape)
 
   # Prediction of reactivity score
-  #Get matrices of shape[num_atoms,num_atoms, hiddenlayers] , this regroups all specific informations of atoms (atoms type, cycle size, molecule size)for each dimension
-  atom_features_1 = tf.repeat(tf.reshape(final_input_atom, [-1, 1, num_atoms, hidden_size]), [num_atoms], axis=1) 
+  # Get matrices of shape[num_atoms,num_atoms, hiddenlayers] , this regroups all specific informations of atoms (atoms type, cycle size, molecule size)for each dimension
+  atom_features_1 = tf.keras.layers.Reshape((1, num_atoms, hidden_size))(final_input_atom)
   print("atom_features_1=",atom_features_1.shape)
-  atom_features_2 = tf.repeat(tf.reshape(final_input_atom, [-1, num_atoms, 1, hidden_size]), [num_atoms], axis=2) 
+  atom_features_1 = tf.repeat(atom_features_1, [num_atoms], axis=1) 
+  print("atom_features_1=",atom_features_1.shape)
+  atom_features_2 = tf.keras.layers.Reshape((num_atoms, 1, hidden_size))(final_input_atom)
+  atom_features_2 = tf.repeat(atom_features_2, [num_atoms], axis=2) 
   print("atom_features_2=",atom_features_2.shape)
-  
+
   #Add informations of pair of atoms,features(bonded, same cycle, same molecule) into the NN 
+  # new_input_pairs = tf.gather_nd(input_pairs, extract_pairs)
   print("input_pairs shape=",input_pairs.shape)
-  new_input_pairs= tf.keras.layers.Dense(hidden_size, activation="relu",name="Dense6")(input_pairs)   #shape = num_atoms,num_atoms,hidden_size
+  new_input_pairs= tf.keras.layers.Dense(hidden_size, activation=activ, kernel_initializer=init, name="Dense2-1")(input_pairs)   #shape = num_atoms,num_atoms,hidden_size
+  if add_layers_1 == 1:
+    new_input_pairs = tf.keras.layers.Dense(hidden_size, activation=activ, kernel_initializer=init, name="Dense2-2")(new_input_pairs)
+  if batchnorm == 1:
+    new_input_pairs = tf.keras.layers.BatchNormalization()(new_input_pairs)
   print("new_input_pairs shape=",new_input_pairs.shape)
 
   #Gather all informations of the generated atoms features 
-  concat = tf.concat([atom_features_1, atom_features_2], axis=-1)                             #shape = num_atoms,num_atoms,hidden_size
-  midlayer = tf.keras.layers.Dense(hidden_size, activation="relu",name="Dense7")(concat)      #shape = num_atoms,num_atoms,hidden_size
+  concat = tf.keras.layers.Concatenate(axis=-1)([atom_features_1, atom_features_2])                             #shape = num_atoms,num_atoms,hidden_size
+  concat = tf.gather_nd(concat, extract_pairs)
+  midlayer = tf.keras.layers.Dense(pairs_encoding_multiplier*hidden_size, activation=activ, kernel_initializer=init, name="Dense3-1")(concat)      #shape = num_atoms,num_atoms,hidden_size
+  if add_layers_1 == 1:
+    midlayer = tf.keras.layers.Dense(pairs_encoding_multiplier*hidden_size, activation=activ, kernel_initializer=init, name="Dense3-2")(midlayer)      #shape = num_atoms,num_atoms,hidden_size
+  if batchnorm == 1:
+    midlayer = tf.keras.layers.BatchNormalization()(midlayer)
   print("midlayer shape=",midlayer.shape)
 
   # Combine previous atom features with the features of the pairs of atoms then add it into the NN
   # This will be used to get probabilities of reactions between all existed pairs of atoms
-  concatenation_atom_and_pair_features = midlayer + new_input_pairs  
+  concatenation_atom_and_pair_features = tf.keras.layers.Concatenate(axis=-1)([midlayer, new_input_pairs])
   print("concat shape=",concatenation_atom_and_pair_features.shape)
-  endput= tf.keras.layers.Dense(hidden_size, activation="relu",name="Dense8")(concatenation_atom_and_pair_features)   #shape = num_atoms,num_atoms,hidden_size
+  endput= tf.keras.layers.Dense(pairs_encoding_multiplier*hidden_size, activation=activ, kernel_initializer=init, name="Dense4-1")(concatenation_atom_and_pair_features)   #shape = num_atoms,num_atoms,hidden_size
+  if add_layers_1 == 1:
+    endput= tf.keras.layers.Dense(pairs_encoding_multiplier*hidden_size, activation=activ, kernel_initializer=init, name="Dense4-2")(endput)   #shape = num_atoms,num_atoms,hidden_size
+  if batchnorm == 1:
+    endput = tf.keras.layers.BatchNormalization()(endput)
+
   print("endput shape=",endput.shape) 
 
   #Retrieve the final probability between 0 and 1, it shows if a reaction will occur or not using sigmoid activation function, convolutional layer
-  preds = tf.keras.layers.Conv2D(1, 1, activation='sigmoid')(endput)      #shape = num_atoms,num_atoms,1
+  #preds = tf.keras.layers.Conv2D(1, 1, activation=None)(endput)      #shape = num_atoms,num_atoms,1
+  preds = tf.keras.layers.Dense(1, activation=None, kernel_initializer=init, kernel_regularizer="l2", name="Dense_last")(endput)
+  print(preds.shape)
+  preds = tf.reduce_sum(endput, axis=-1)
+  if last_batchnorm == 1:
+    preds = tf.keras.layers.BatchNormalization()(preds)
+  print(preds.shape)
+  preds_probs = tf.keras.layers.Softmax(name='prediction_probs')(preds)
+  preds_time = tf.keras.layers.Flatten()(preds)
+  preds_time = tf.math.exp(preds_time)
+  preds_time = tf.reduce_mean(preds_time, axis=-1, keepdims=True)
+  preds_time = tf.ones_like(preds_time, dtype=tf.float32)
+  preds_time = tf.keras.layers.Lambda(lambda x: x, name='prediction_time')(preds_time)
+  # preds_time = tf.keras.layers.Dense(1, kernel_initializer='ones', trainable=False,kernel_regularizer="l2", name='prediction_time')(preds_time)
+  # preds_time = tf.expand_dims(preds_time, axis=-1, name='prediction_time')
   print("final pred=",preds.shape)
+  print("Pred_probs = ", preds_probs.shape)
+  print("Preds_time = ", preds_time.shape)
 
-  return tf.keras.Model(inputs=[input_atom, input_pairs, atom_graph, mask], outputs=preds)
+  return tf.keras.Model(inputs=[input_atom, input_pairs, atom_graph, mask, extract_pairs], outputs=[preds_probs, preds_time])
