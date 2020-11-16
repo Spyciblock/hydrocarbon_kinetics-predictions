@@ -8,7 +8,7 @@ You can install Python dependencies of our environment using `pip install -r req
 ## Running the best model with best hyperparameters
 `python run_all.py`
 
-### In other_models directory, you will find few models with different hyperparameters and architecture used during our tuning step.To run our first basic model, we can do it with 'python train_mode.py', or 
-'python train_modeltune.py' if we want to vary some elements.
+### In other_models directory, you will find few models with different hyperparameters and architecture used during our tuning step.
+To run our first basic model, we can do it with `python train_mode.py`, or `python train_modeltune.py` if we want to vary some elements.
 ### References:
 - [A graph-convolutional neural network model for the prediction of chemical reactivity](https://pubs.rsc.org/lv/content/articlehtml/2019/sc/c8sc04228d#imgfig1)
